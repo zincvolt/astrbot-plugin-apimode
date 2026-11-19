@@ -17,6 +17,7 @@
   "judge_delay": 2.0,
   "reply_gap": 6,
   "inflight_ttl": 45,
+  "inflight_lock": true,
   "dup_window": 45,
   "dup_ratio": 0.75,
   "burst_enable": true,

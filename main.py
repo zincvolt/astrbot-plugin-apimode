@@ -485,6 +485,7 @@ class Main(star.Star):
                     f"今日 {used.get('tokens', 0)}/"
                     f"{judge_data.get('daily_limit', 0)} tokens\n"
                     f"话段聚合 {'开' if burst_on else '关'} · "
+                    f"在途硬锁 {'开' if judge_data.get('inflight_lock', True) else '关'}\n"
                     f"等待 {judge_data.get('burst_settle', 3.5)}s · "
                     f"复用 {judge_data.get('burst_reuse', 45)}s · "
                     f"回复后静默 {judge_data.get('reply_gap', 6)}s"
@@ -503,6 +504,10 @@ class Main(star.Star):
                 value = low.endswith(("on", "开"))
                 judge_data["burst_enable"] = value
                 note = f"话段聚合 {'开' if value else '关'}"
+            elif low.startswith(("锁", "lock")):
+                value = low.endswith(("on", "开"))
+                judge_data["inflight_lock"] = value
+                note = f"在途硬锁 {'开' if value else '关'}"
             elif low.startswith(("等待", "settle")):
                 numbers = re.findall(r"\d+(?:\.\d+)?", arg)
                 if not numbers:
@@ -526,7 +531,7 @@ class Main(star.Star):
             else:
                 await event.send(event.plain_result(
                     "用法：/判官 [状态|开关 on/off|预算 on/off|概率 on/off|"
-                    "话段 on/off|等待 N|限额 N]"
+                    "话段 on/off|锁 on/off|等待 N|限额 N]"
                 ))
                 event.stop_event()
                 return
