@@ -66,6 +66,34 @@ def today() -> str:
     return datetime.now().strftime("%Y%m%d")
 
 
+def current_mode() -> str:
+    """Return the mode implied by the provider that actually serves chat.
+
+    ``api_mode.json`` 里的 ``mode`` 只是 /切换 的记账，WebUI 改 provider 或者
+    老文件缺字段时它会是空的（之前额度闸和审查因此静默失效）。真正的事实是
+    ``agent_runner.config.model.provider_id``，所以这里以它为准，文件只做兜底。
+
+    Returns:
+        ``third_party`` 或 ``local``。
+    """
+    try:
+        cfg = json.loads(CONFIG.read_text(encoding="utf-8-sig"))
+        pid = str(
+            cfg.get("agent_runner", {})
+            .get("config", {})
+            .get("model", {})
+            .get("provider_id", "")
+        )
+        if pid:
+            return "third_party" if "deepseek" in pid else "local"
+    except (json.JSONDecodeError, OSError):
+        pass
+    try:
+        return str(json.loads(STATE.read_text(encoding="utf-8")).get("mode") or "local")
+    except (json.JSONDecodeError, OSError):
+        return "local"
+
+
 def review_words() -> list[str]:
     """Load the review word list, creating the default file when missing."""
     if not WORDS.exists():
@@ -307,7 +335,7 @@ class Main(star.Star):
     async def budget_gate(self, event: AstrMessageEvent, req) -> None:
         """Block requests once the daily token budget is used up."""
         state = load_state()
-        if state.get("mode") != "third_party":
+        if current_mode() != "third_party":
             return
         if state.get("save_token") and getattr(req, "contexts", None):
             # 省 token：保留条数由控制台滑块决定
@@ -326,6 +354,8 @@ class Main(star.Star):
     @filter.on_llm_response()
     async def count_usage(self, event: AstrMessageEvent, resp) -> None:
         """Accumulate token usage reported by the provider."""
+        if current_mode() != "third_party":
+            return
         usage = getattr(resp, "usage", None)
         tokens = 0
         if usage is not None:
@@ -353,7 +383,7 @@ class Main(star.Star):
     async def review_output(self, event: AstrMessageEvent) -> None:
         """Filter replies in reviewed groups while on the third-party API."""
         state = load_state()
-        if state.get("mode") != "third_party":
+        if current_mode() != "third_party":
             return
         group = str(event.get_group_id() or "")
         if not group or not (state.get("review_groups") or {}).get(group):
@@ -450,7 +480,7 @@ class Main(star.Star):
         if body in ("用量", "额度查询"):
             used = state.get("used") or {}
             await event.send(event.plain_result(
-                f"模式 {state.get('mode')} · 今日 {used.get('tokens', 0)} / "
+                f"模式 {current_mode()} · 今日 {used.get('tokens', 0)} / "
                 f"{state.get('daily_limit')} tokens · 省token "
                 f"{'开' if state.get('save_token') else '关'}"
             ))
@@ -612,7 +642,7 @@ class Main(star.Star):
             groups[group] = on
             state["review_groups"] = groups
             save_state(state)
-            note = "" if state.get("mode") == "third_party" else "（当前不是第三方模式，暂不生效）"
+            note = "" if current_mode() == "third_party" else "（当前不是第三方模式，暂不生效）"
             await event.send(event.plain_result(
                 f"本群审查{'开' if on else '关'}{note}"
             ))
