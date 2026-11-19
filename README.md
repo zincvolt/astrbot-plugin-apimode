@@ -11,6 +11,7 @@
 - **省 token**：`/省token on|off` 控制是否压缩发给模型的上下文。
 - **按群审查**：`/审查 on|off` 对指定群的模型输出做后置审查（仅第三方模式生效）。
 - **用量查询**：`/用量` 看当日已用 token。
+- **判官开关**：`/判官 状态` 看第三方判官的开关、条数前处理、概率闸与今日 tokens；`/判官 开关 on|off`、`/判官 预算 on|off`、`/判官 概率 on|off`、`/判官 限额 N` 改配置（写 `data/judge_api.json`，无需重启）。
 
 以上管理命令仅限管理员。
 
@@ -29,6 +30,28 @@
 ```
 
 > 注意：本插件的状态文件只是记账。**模式的唯一真相是 AstrBot 自身的 `provider_id` 配置**，本插件切换时同步修改它；手动改 `api_mode.json` 不会真正生效。
+
+## 判官配置（`data/judge_api.json`）
+
+`/判官` 命令改的是另一份文件，和上面这份记账文件无关：
+
+```json
+{
+  "enable": true,
+  "api_base": "https://api.deepseek.com/v1",
+  "api_key": "",
+  "model": "",
+  "budget_gate": true,
+  "use_reply_chance": false,
+  "fallback_chance": 0.3,
+  "daily_limit": 50000,
+  "used": { "date": "", "tokens": 0 }
+}
+```
+
+- `api_key` 留空表示沿用主模型（deepseek provider）的密钥
+- 判官的判定链路与提示词在主仓 AstrBot 补丁 `group_chat_context.py` 里，本插件只负责开关和记账
+- 本地模式（`local-llama`）不读这份文件，仍用 `data/judge.json` + 8082
 
 ## 依赖
 

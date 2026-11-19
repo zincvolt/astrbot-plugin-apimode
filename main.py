@@ -458,9 +458,65 @@ class Main(star.Star):
             return
 
         if not self._is_admin(event):
-            if body.startswith(("切换", "额度", "省token", "审查")):
+            if body.startswith(("切换", "额度", "省token", "审查", "判官")):
                 await event.send(event.plain_result("只有管理员能改这些"))
                 event.stop_event()
+            return
+
+        if body.startswith("判官"):
+            path = ROOT / "data" / "judge_api.json"
+            try:
+                judge_data = (
+                    json.loads(path.read_text(encoding="utf-8-sig"))
+                    if path.exists()
+                    else {}
+                )
+            except (json.JSONDecodeError, OSError):
+                judge_data = {}
+            arg = body.replace("判官", "", 1).strip()
+            low = arg.lower()
+            if low in ("", "状态"):
+                used = judge_data.get("used") or {}
+                await event.send(event.plain_result(
+                    f"判官 {'开' if judge_data.get('enable', True) else '关'} · "
+                    f"条数前处理 {'开' if judge_data.get('budget_gate', True) else '关'} · "
+                    f"概率闸 {'开' if judge_data.get('use_reply_chance') else '关'} · "
+                    f"今日 {used.get('tokens', 0)}/"
+                    f"{judge_data.get('daily_limit', 0)} tokens"
+                ))
+                event.stop_event()
+                return
+            if low.startswith(("预算", "条数")):
+                value = low.endswith(("on", "开"))
+                judge_data["budget_gate"] = value
+                note = f"条数前处理 {'开' if value else '关'}"
+            elif low.startswith(("概率", "chance")):
+                value = low.endswith(("on", "开"))
+                judge_data["use_reply_chance"] = value
+                note = f"概率闸 {'开' if value else '关'}"
+            elif low.startswith(("开关", "enable")):
+                value = low.endswith(("on", "开"))
+                judge_data["enable"] = value
+                note = f"第三方判官 {'开' if value else '关'}"
+            elif low.startswith(("限额", "limit")):
+                numbers = re.findall(r"\d+", arg)
+                if not numbers:
+                    await event.send(event.plain_result("用法：/判官 限额 50000"))
+                    event.stop_event()
+                    return
+                judge_data["daily_limit"] = int(numbers[0])
+                note = f"日限额 {judge_data['daily_limit']} tokens"
+            else:
+                await event.send(event.plain_result(
+                    "用法：/判官 [状态|开关 on/off|预算 on/off|概率 on/off|限额 N]"
+                ))
+                event.stop_event()
+                return
+            path.write_text(
+                json.dumps(judge_data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            await event.send(event.plain_result(f"已保存：{note}"))
+            event.stop_event()
             return
 
         if body.startswith("切换"):
