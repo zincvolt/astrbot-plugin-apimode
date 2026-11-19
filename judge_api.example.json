@@ -2,8 +2,8 @@
   "enable": true,
   "api_base": "https://api.deepseek.com/v1",
   "api_key": "",
-  "model": "",
-  "prompt": "你是群聊接话判定器。判断机器人要不要接最后一条消息。\n规则：\n- @ 机器人、叫它名字、纠错或追问它刚才说的话 → 1\n- 向它提问、倾诉、求助 → 1\n- 别人互相聊天、陈述自己的安排、跟它无关 → 0\n- 骂人、复读、纯表情 → 0\n最多参考最近 3 条消息。\n\n最近聊天：\n{recent}\n\n你刚才说：{last_bot}\n\n新消息：{message}\n\n只输出 1 或 0。",
+  "model": "deepseek-flash",
+  "prompt": "群聊接话判定：最后一条要不要回。\n- @它、叫它名字、追问或纠正它 → 1\n- 向它提问、倾诉、求助 → 1\n- 别人互聊、说自己的安排、与它无关 → 0\n- 骂人、复读、纯表情、尖叫 → 0\n\n最近：\n{recent}\n\n它刚说：{last_bot}\n\n新消息：{message}\n\n只回 1 或 0。",
   "recent_max": 3,
   "recent_chars": 60,
   "include_last_bot": true,
@@ -26,13 +26,30 @@
   "burst_reuse": 45,
   "summon_gap": 4,
   "break_follow": 30,
-  "bot_names": ["阿灰"],
+  "bot_names": [
+    "阿灰"
+  ],
   "break_words": [
-    "傻逼", "傻b", "sb", "智障", "弱智", "脑子有病", "废物", "垃圾",
-    "闭嘴", "滚", "蠢", "笨蛋", "狗东西", "欠揍"
+    "傻逼",
+    "傻b",
+    "sb",
+    "智障",
+    "弱智",
+    "脑子有病",
+    "废物",
+    "垃圾",
+    "闭嘴",
+    "滚",
+    "蠢",
+    "笨蛋",
+    "狗东西",
+    "欠揍"
   ],
   "daily_limit": 50000,
-  "used": { "date": "", "tokens": 0 },
+  "used": {
+    "date": "",
+    "tokens": 0
+  },
   "ignore": [],
   "force_reply": [],
   "force_patterns": [],
