@@ -477,12 +477,17 @@ class Main(star.Star):
             low = arg.lower()
             if low in ("", "状态"):
                 used = judge_data.get("used") or {}
+                burst_on = judge_data.get("burst_enable", True)
                 await event.send(event.plain_result(
                     f"判官 {'开' if judge_data.get('enable', True) else '关'} · "
                     f"条数前处理 {'开' if judge_data.get('budget_gate', True) else '关'} · "
                     f"概率闸 {'开' if judge_data.get('use_reply_chance') else '关'} · "
                     f"今日 {used.get('tokens', 0)}/"
-                    f"{judge_data.get('daily_limit', 0)} tokens"
+                    f"{judge_data.get('daily_limit', 0)} tokens\n"
+                    f"话段聚合 {'开' if burst_on else '关'} · "
+                    f"等待 {judge_data.get('burst_settle', 3.5)}s · "
+                    f"复用 {judge_data.get('burst_reuse', 45)}s · "
+                    f"回复后静默 {judge_data.get('reply_gap', 6)}s"
                 ))
                 event.stop_event()
                 return
@@ -494,6 +499,18 @@ class Main(star.Star):
                 value = low.endswith(("on", "开"))
                 judge_data["use_reply_chance"] = value
                 note = f"概率闸 {'开' if value else '关'}"
+            elif low.startswith(("话段", "burst")):
+                value = low.endswith(("on", "开"))
+                judge_data["burst_enable"] = value
+                note = f"话段聚合 {'开' if value else '关'}"
+            elif low.startswith(("等待", "settle")):
+                numbers = re.findall(r"\d+(?:\.\d+)?", arg)
+                if not numbers:
+                    await event.send(event.plain_result("用法：/判官 等待 3.5"))
+                    event.stop_event()
+                    return
+                judge_data["burst_settle"] = max(0.0, min(10.0, float(numbers[0])))
+                note = f"话段等待 {judge_data['burst_settle']}s"
             elif low.startswith(("开关", "enable")):
                 value = low.endswith(("on", "开"))
                 judge_data["enable"] = value
@@ -508,7 +525,8 @@ class Main(star.Star):
                 note = f"日限额 {judge_data['daily_limit']} tokens"
             else:
                 await event.send(event.plain_result(
-                    "用法：/判官 [状态|开关 on/off|预算 on/off|概率 on/off|限额 N]"
+                    "用法：/判官 [状态|开关 on/off|预算 on/off|概率 on/off|"
+                    "话段 on/off|等待 N|限额 N]"
                 ))
                 event.stop_event()
                 return

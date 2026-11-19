@@ -11,7 +11,7 @@
 - **省 token**：`/省token on|off` 控制是否压缩发给模型的上下文。
 - **按群审查**：`/审查 on|off` 对指定群的模型输出做后置审查（仅第三方模式生效）。
 - **用量查询**：`/用量` 看当日已用 token。
-- **判官开关**：`/判官 状态` 看第三方判官的开关、条数前处理、概率闸与今日 tokens；`/判官 开关 on|off`、`/判官 预算 on|off`、`/判官 概率 on|off`、`/判官 限额 N` 改配置（写 `data/judge_api.json`，无需重启）。
+- **判官开关**：`/判官 状态` 看第三方判官的开关、条数前处理、概率闸、话段聚合与今日 tokens；`/判官 开关 on|off`、`/判官 预算 on|off`、`/判官 概率 on|off`、`/判官 话段 on|off`、`/判官 等待 N`、`/判官 限额 N` 改配置（写 `data/judge_api.json`，无需重启）。
 
 以上管理命令仅限管理员。
 
@@ -33,25 +33,35 @@
 
 ## 判官配置（`data/judge_api.json`）
 
-`/判官` 命令改的是另一份文件，和上面这份记账文件无关：
+`/判官` 命令改的是另一份文件，和上面这份记账文件无关。完整字段见
+[`judge_api.example.json`](judge_api.example.json)，核心几项：
 
-```json
-{
-  "enable": true,
-  "api_base": "https://api.deepseek.com/v1",
-  "api_key": "",
-  "model": "",
-  "budget_gate": true,
-  "use_reply_chance": false,
-  "fallback_chance": 0.3,
-  "daily_limit": 50000,
-  "used": { "date": "", "tokens": 0 }
-}
-```
+| 字段 | 默认 | 作用 |
+|---|---|---|
+| `enable` | true | 第三方判官总开关；关掉退回「规则 + 概率」 |
+| `budget_gate` | true | 条数限制前处理，超预算不调模型 |
+| `use_reply_chance` / `reply_chance` | false / 1.0 | 判官说接之后是否再抽一次概率 |
+| `fallback_chance` | 0.3 | 判官失败/超限时的兜底概率 |
+| `burst_enable` | true | 话段聚合总开关 |
+| `burst_settle` | 3.5 | 判定前等这一口气说完的秒数 |
+| `burst_gap` | 15 | 两条消息间隔小于它算同一段 |
+| `burst_reuse` | 45 | 这一段判过/回过后不再送判官的秒数（省 token） |
+| `reply_gap` | 6 | 回复真正发完后的静默秒数 |
+| `inflight_ttl` | 45 | 判定通过后「回复在途」最长认领秒数 |
+| `bot_names` | `["阿灰"]` | 叫到这些名字直接接，不吃冷却 |
+| `break_words` | 见示例 | 脏话词表，命中只代表「让判官看一眼」，由判官判断在骂谁 |
 
 - `api_key` 留空表示沿用主模型（deepseek provider）的密钥
-- 判官的判定链路与提示词在主仓 AstrBot 补丁 `group_chat_context.py` 里，本插件只负责开关和记账
-- 本地模式（`local-llama`）不读这份文件，仍用 `data/judge.json` + 8082
+- 判官的判定链路与提示词在主仓 AstrBot 补丁 `group_chat_context.py` 里，本插件只负责开关、记账和这几条命令
+- 本地模式（`local-llama`）不读这份文件，仍用 `data/judge.json` + 8082；话段聚合也只在第三方模式生效
+
+### 关于「发送耗时」
+
+回复是 AstrBot 分段发出去的（`platform_settings.segmented_reply`），每段之间会
+`sleep`。所以「模型生成完」不等于「消息发完」，判官补丁会按分段配置估算真实
+发送时长（human 模式 ≈ 每段 `0.45 + 字数/7`，乘 0.75~1.35 抖动，单段上限 5.5s），
+把冷却期挪到「预计发完」之后。要复用这套逻辑，直接抄
+`_estimate_send_seconds()` / `_split_segments()` 两个函数即可，它们不依赖 AstrBot 运行时。
 
 ## 依赖
 
