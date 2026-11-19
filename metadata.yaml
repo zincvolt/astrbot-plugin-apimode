@@ -1,0 +1,4 @@
+name: astrbot_plugin_apimode
+desc: 本地/第三方 API 切换、token 额度、按群审查
+author: local
+version: 1.0.0
