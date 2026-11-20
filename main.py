@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -35,7 +36,28 @@ STATE = ROOT / "data" / "api_mode.json"
 CONFIG = ROOT / "apps" / "AstrBot" / "data" / "cmd_config.json"
 REPLY = ROOT / "data" / "reply.json"
 WORDS = ROOT / "data" / "review_words.txt"
-ADMINS = {"1154487120"}
+
+# 权限：优先用 access 统一判定，单拎时自动降级为本地名单（也能用）
+sys.path.insert(0, str(Path(__file__).parent.parent / "astrbot_plugin_access"))
+try:
+    from unified_perm import is_admin as _unified_is_admin
+except ImportError:
+    _STANDALONE_ADMINS = {"1154487120"}
+    def _unified_is_admin(event):  # noqa: F811
+        uid = str(event.get_sender_id() or "")
+        return uid in _STANDALONE_ADMINS or getattr(event, "role", "") == "admin"
+
+# 本插件自声明指令（单拎时帮助/权限表自动读这里）
+DECLARED_COMMANDS = {
+    "/切换 api 本地|第三方": ("切换本地/第三方模型", "管理"),
+    "/额度 <数字>": ("设每日 token 上限", "管理"),
+    "/省token on|off": ("省 token 模式", "管理"),
+    "/审查 on|off": ("本群内容审查开关", "管理"),
+    "/思维链 off|on|low|high|max": ("第三方思维链强度", "管理"),
+    "/判官 状态|开关|预算|概率|限额": ("第三方判官配置", "管理"),
+    "/用量": ("看模式/用量/额度", "管理"),
+    "/额度查询": ("同 /用量", "管理"),
+}
 
 DEFAULT_WORDS = [
     "习近平", "共产党", "台独", "六四", "天安门事件", "法轮功",
@@ -329,7 +351,8 @@ class Main(star.Star):
         logger.info("[apimode] ready")
 
     def _is_admin(self, event: AstrMessageEvent) -> bool:
-        return str(event.get_sender_id()) in ADMINS
+        # 权限归 access 统一判定（super_admins ∪ admins_id ∪ FURCON_ADMINS ∪ 群管理）
+        return _unified_is_admin(event)
 
     @filter.on_llm_request()
     async def budget_gate(self, event: AstrMessageEvent, req) -> None:
