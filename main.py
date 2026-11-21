@@ -116,6 +116,42 @@ def current_mode() -> str:
         return "local"
 
 
+def _usage_tokens(usage) -> int:
+    """Extract the token count from an AstrBot v4 ``TokenUsage`` object.
+
+    AstrBot v4 的字段是 input_other/input_cached/output（total 是 property），
+    不是 OpenAI 风格的 total_tokens/prompt_tokens；两套名字都兜一下。
+
+    Args:
+        usage: ``TokenUsage`` instance or anything similar (may be None).
+
+    Returns:
+        Total token count, 0 when unusable.
+    """
+    if usage is None:
+        return 0
+    total = getattr(usage, "total", None)  # TokenUsage.total property
+    if isinstance(total, int):
+        return total
+    tokens = 0
+    for attr in ("input_other", "input_cached", "input_tokens", "prompt_tokens"):
+        tokens += int(getattr(usage, attr, 0) or 0)
+    for attr in ("output", "output_tokens", "completion_tokens"):
+        tokens += int(getattr(usage, attr, 0) or 0)
+    return tokens
+
+
+def add_tokens(tokens: int) -> None:
+    """Add ``tokens`` to today's usage counter."""
+    state = load_state()
+    used = state.get("used") or {}
+    if used.get("date") != today():
+        used = {"date": today(), "tokens": 0}
+    used["tokens"] = int(used.get("tokens") or 0) + int(tokens)
+    state["used"] = used
+    save_state(state)
+
+
 def review_words() -> list[str]:
     """Load the review word list, creating the default file when missing."""
     if not WORDS.exists():
@@ -374,36 +410,8 @@ class Main(star.Star):
             event.stop_event()
             logger.warning("[apimode] daily budget exhausted")
 
-    @filter.on_llm_response()
-    async def count_usage(self, event: AstrMessageEvent, resp) -> None:
-        """Accumulate token usage reported by the provider.
-
-        AstrBot v4 的 TokenUsage 字段是 input_other/input_cached/output
-        （total 是 property），不是 OpenAI 风格的 total_tokens/prompt_tokens
-        ——旧字段名一个都对不上，计数恒 0（2026-11-21 修复）。
-        """
-        if current_mode() != "third_party":
-            return
-        usage = getattr(resp, "usage", None)
-        tokens = 0
-        if usage is not None:
-            total = getattr(usage, "total", None)  # TokenUsage.total property
-            if isinstance(total, int):
-                tokens = total
-            if not tokens:
-                for attr in ("input_other", "input_cached", "input_tokens", "prompt_tokens"):
-                    tokens += int(getattr(usage, attr, 0) or 0)
-                for attr in ("output", "output_tokens", "completion_tokens"):
-                    tokens += int(getattr(usage, attr, 0) or 0)
-        if not tokens:
-            return
-        state = load_state()
-        used = state.get("used") or {}
-        if used.get("date") != today():
-            used = {"date": today(), "tokens": 0}
-        used["tokens"] = int(used.get("tokens") or 0) + int(tokens)
-        state["used"] = used
-        save_state(state)
+    # 计数已移到 provider 调用层（_install_provider_counter）：on_llm_response
+    # 只在 agent 结束时触发一次，中间工具循环调用根本不经过它，挂着只会漏计。
 
     @filter.on_decorating_result()
     async def review_output(self, event: AstrMessageEvent) -> None:
@@ -455,10 +463,72 @@ class Main(star.Star):
 
     @filter.on_astrbot_loaded()
     async def watch_provider_switch(self) -> None:
-        """Start the provider watcher."""
+        """Start the provider watcher and the usage counter."""
         import asyncio
 
         asyncio.create_task(self._provider_watch())
+        asyncio.create_task(self._install_provider_counter())
+
+    async def _install_provider_counter(self) -> None:
+        """Wrap the third-party provider's chat methods to count every call.
+
+        ``on_llm_response`` 只在 agent 结束时触发一次，工具循环的中间调用
+        （每轮带着工具结果再问一次模型的那些）不经过任何事件钩子，但全都
+        走 provider 实例的 ``text_chat`` / ``text_chat_stream``——在这层包
+        一张网就能数到每一次真实 API 调用。判官、ltm 抽取是 httpx 直连，
+        不经过 provider，天然不计入（它们有各自的记账）。
+        """
+        import asyncio
+
+        # provider manager 可能比插件晚就绪，最多等 60s
+        provider = None
+        for _ in range(12):
+            try:
+                provider = self.context.get_provider_by_id("deepseek")
+            except Exception:  # noqa: BLE001
+                provider = None
+            if provider is not None:
+                break
+            await asyncio.sleep(5)
+        if provider is None:
+            logger.warning("[apimode] usage counter not installed: no deepseek provider")
+            return
+        if getattr(provider, "_apimode_counted", False):
+            return  # 插件重载防重复包装
+
+        orig_chat = provider.text_chat
+        orig_stream = provider.text_chat_stream
+
+        async def counted_chat(*args, **kwargs):
+            resp = await orig_chat(*args, **kwargs)
+            try:
+                self._count_response(resp)
+            except Exception as exc:  # noqa: BLE001 - counting must not break chat
+                logger.warning(f"[apimode] usage count failed: {exc}")
+            return resp
+
+        async def counted_stream(*args, **kwargs):
+            # 只有流末尾的完整帧（is_chunk=False）带 usage，每个流恰好一次
+            async for resp in orig_stream(*args, **kwargs):
+                try:
+                    self._count_response(resp)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"[apimode] usage count failed: {exc}")
+                yield resp
+
+        provider.text_chat = counted_chat
+        provider.text_chat_stream = counted_stream
+        provider._apimode_counted = True
+        logger.info("[apimode] usage counter installed on provider deepseek")
+
+    @staticmethod
+    def _count_response(resp) -> None:
+        """Accumulate usage from one completed LLM response, if any."""
+        if getattr(resp, "is_chunk", False):
+            return
+        tokens = _usage_tokens(getattr(resp, "usage", None))
+        if tokens:
+            add_tokens(tokens)
 
     async def _provider_watch(self) -> None:
         """Poll the active provider and react to local <-> API transitions."""
