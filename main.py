@@ -376,21 +376,24 @@ class Main(star.Star):
 
     @filter.on_llm_response()
     async def count_usage(self, event: AstrMessageEvent, resp) -> None:
-        """Accumulate token usage reported by the provider."""
+        """Accumulate token usage reported by the provider.
+
+        AstrBot v4 的 TokenUsage 字段是 input_other/input_cached/output
+        （total 是 property），不是 OpenAI 风格的 total_tokens/prompt_tokens
+        ——旧字段名一个都对不上，计数恒 0（2026-11-21 修复）。
+        """
         if current_mode() != "third_party":
             return
         usage = getattr(resp, "usage", None)
         tokens = 0
         if usage is not None:
-            for attr in ("total_tokens", "total_token_count"):
-                value = getattr(usage, attr, None)
-                if isinstance(value, int):
-                    tokens = value
-                    break
+            total = getattr(usage, "total", None)  # TokenUsage.total property
+            if isinstance(total, int):
+                tokens = total
             if not tokens:
-                for attr in ("input_tokens", "prompt_tokens"):
+                for attr in ("input_other", "input_cached", "input_tokens", "prompt_tokens"):
                     tokens += int(getattr(usage, attr, 0) or 0)
-                for attr in ("output_tokens", "completion_tokens"):
+                for attr in ("output", "output_tokens", "completion_tokens"):
                     tokens += int(getattr(usage, attr, 0) or 0)
         if not tokens:
             return
